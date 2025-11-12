@@ -1,3 +1,8 @@
+// Global map instance and markers
+let currentMapInstance = null;
+let currentMarkers = [];
+let userLocationMarker = null;
+
 // Function to geocode address to coordinates using Nominatim (free, no API key needed)
 async function geocodeAddress(address) {
     try {
@@ -100,33 +105,15 @@ async function fetchNearbyPlaces(lat, lng, radius = 10000) { // Radius in meters
     }
 }
 
-// Search by address input
-document.getElementById('search').addEventListener('click', async () => {
-    const locationInput = document.getElementById('location').value.trim();
-    
-    if (!locationInput) {
-        alert('Please enter a location or use "Use My Location" button.');
-        return;
-    }
-    
-    const geocodeResult = await geocodeAddress(locationInput);
-    
-    if (!geocodeResult) {
-        alert('Location not found. Please try a different address or city name.');
-        return;
-    }
-    
-    const places = await fetchNearbyPlaces(geocodeResult.lat, geocodeResult.lng);
-    displayResults(geocodeResult.lat, geocodeResult.lng, places);
-    initMap(geocodeResult.lat, geocodeResult.lng, places);
-});
-
 // Use current location
 document.getElementById('use-location').addEventListener('click', async () => {
     if (!navigator.geolocation) {
         alert('Geolocation is not supported by your browser.');
         return;
     }
+    
+    const loading = document.getElementById('loading');
+    loading.classList.remove('hidden');
     
     navigator.geolocation.getCurrentPosition(
         async position => {
@@ -135,20 +122,15 @@ document.getElementById('use-location').addEventListener('click', async () => {
             console.log('Geolocation success:', userLat, userLng);
             const places = await fetchNearbyPlaces(userLat, userLng);
             displayResults(userLat, userLng, places);
-            initMap(userLat, userLng, places);
+            updateMap(userLat, userLng, places);
+            loading.classList.add('hidden');
         },
         async error => {
             console.error('Geolocation error:', error);
-            alert('Location access failed. Please allow location access or search by address.');
+            alert('Location access failed. Please allow location access.');
+            loading.classList.add('hidden');
         }
     );
-});
-
-// Allow Enter key to trigger search
-document.getElementById('location').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        document.getElementById('search').click();
-    }
 });
 
 function displayResults(lat, lng, places) {
@@ -192,8 +174,8 @@ function calculateDistance(lat1, lng1, lat2, lng2) {
     return R * c;
 }
 
-function initMap(lat, lng, places) {
-    console.log('Initializing map with places:', places);
+// Initialize map once on page load
+function initializeMap() {
     const mapContainer = document.getElementById('map');
     
     if (!mapContainer) {
@@ -201,136 +183,92 @@ function initMap(lat, lng, places) {
         return;
     }
     
-    // Validate coordinates
-    if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-        console.error('Invalid coordinates:', lat, lng);
-        mapContainer.innerHTML = '<p style="padding: 2rem; text-align: center; color: #7a8a7a;">Invalid location coordinates.</p>';
-        return;
-    }
-    
-    mapContainer.innerHTML = ''; // Clear previous map
-    
     // Check if Leaflet is loaded
     if (typeof L === 'undefined') {
         console.error('Leaflet library not loaded');
-        mapContainer.innerHTML = '<p style="padding: 2rem; text-align: center; color: #7a8a7a;">Map library is loading. Please wait...</p>';
-        // Retry after a short delay
-        setTimeout(() => {
-            if (typeof L !== 'undefined') {
-                initMap(lat, lng, places);
-            } else {
-                mapContainer.innerHTML = '<p style="padding: 2rem; text-align: center; color: #7a8a7a;">Map library failed to load. Please refresh the page.</p>';
-            }
-        }, 1000);
+        setTimeout(initializeMap, 500);
         return;
     }
     
-    // Use Leaflet (OpenStreetMap) - No API key needed!
+    // Check if map already exists
+    if (currentMapInstance) {
+        return;
+    }
+    
+    // Ensure map container has dimensions
+    if (mapContainer.offsetWidth === 0 || mapContainer.offsetHeight === 0) {
+        setTimeout(initializeMap, 100);
+        return;
+    }
+    
     try {
-        // Ensure map container has dimensions
-        if (mapContainer.offsetWidth === 0 || mapContainer.offsetHeight === 0) {
-            console.warn('Map container has no dimensions, waiting...');
-            setTimeout(() => initMap(lat, lng, places), 100);
-            return;
-        }
-        
+        // Initialize map with a default center (world view)
         const map = L.map(mapContainer, {
             zoomControl: true,
             attributionControl: true
-        }).setView([lat, lng], 12);
+        }).setView([20, 0], 2); // World view
         
-        // Try multiple tile servers as fallback
-        const tileServers = [
-            {
-                url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                attribution: '© OpenStreetMap contributors',
-                name: 'OpenStreetMap'
-            },
-            {
-                url: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
-                attribution: '© OpenStreetMap contributors, Tiles style by HOT',
-                name: 'HOT'
-            },
-            {
-                url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                attribution: '© OpenStreetMap contributors',
-                name: 'OSM Direct'
-            }
-        ];
+        // Add tile layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 19,
+            crossOrigin: true
+        }).addTo(map);
         
-        let currentTileLayer = null;
-        let tileLayerIndex = 0;
-        let errorCount = 0;
-        const MAX_TILE_ERRORS = 5; // Switch after 5 tile errors
+        currentMapInstance = map;
+        console.log('Map initialized');
+    } catch (error) {
+        console.error('Map initialization error:', error);
+    }
+}
+
+// Update map with new location and places
+function updateMap(lat, lng, places) {
+    if (!currentMapInstance) {
+        // If map not initialized, initialize it first
+        initializeMap();
+        // Wait a bit for map to initialize, then update
+        setTimeout(() => updateMap(lat, lng, places), 500);
+        return;
+    }
+    
+    // Validate coordinates
+    if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        console.error('Invalid coordinates:', lat, lng);
+        return;
+    }
+    
+    try {
+        // Update map center and zoom
+        currentMapInstance.setView([lat, lng], 12);
         
-        function addTileLayer(index) {
-            if (index >= tileServers.length) {
-                console.error('All tile servers failed');
-                if (!currentTileLayer) {
-                    mapContainer.innerHTML = '<p style="padding: 2rem; text-align: center; color: #7a8a7a;">Map tiles could not be loaded. Please check your internet connection and try again.</p>';
-                }
-                return;
-            }
-            
-            const server = tileServers[index];
-            
-            // Remove previous tile layer if exists
-            if (currentTileLayer) {
-                map.removeLayer(currentTileLayer);
-            }
-            
-            const tileLayer = L.tileLayer(server.url, {
-                attribution: server.attribution,
-                maxZoom: 19,
-                crossOrigin: true
-            });
-            
-            tileLayer.on('tileerror', function(error, tile) {
-                errorCount++;
-                console.warn(`Tile error ${errorCount}/${MAX_TILE_ERRORS} for ${server.name}`);
-                
-                // If too many errors, try next server
-                if (errorCount >= MAX_TILE_ERRORS && index < tileServers.length - 1) {
-                    console.log(`Switching to fallback tile server: ${tileServers[index + 1].name}`);
-                    errorCount = 0;
-                    addTileLayer(index + 1);
-                }
-            });
-            
-            tileLayer.on('tileload', function() {
-                // Reset error count on successful tile load
-                if (errorCount > 0) {
-                    errorCount = Math.max(0, errorCount - 1);
-                }
-            });
-            
-            currentTileLayer = tileLayer;
-            tileLayer.addTo(map);
-            console.log('Using tile server:', server.name);
+        // Remove old markers
+        currentMarkers.forEach(marker => {
+            currentMapInstance.removeLayer(marker);
+        });
+        currentMarkers = [];
+        
+        // Remove old user location marker
+        if (userLocationMarker) {
+            currentMapInstance.removeLayer(userLocationMarker);
+            userLocationMarker = null;
         }
         
-        // Start with first tile server
-        addTileLayer(0);
-        
-        // Add user location marker
-        try {
-            L.marker([lat, lng], {
-                icon: L.divIcon({
-                    className: 'user-location-marker',
-                    html: '<div style="background-color: #2d5016; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>',
-                    iconSize: [20, 20],
-                    iconAnchor: [10, 10]
-                })
-            }).addTo(map).bindPopup('<strong>Your Location</strong>');
-        } catch (markerError) {
-            console.warn('Could not add user location marker:', markerError);
-        }
+        // Add new user location marker
+        userLocationMarker = L.marker([lat, lng], {
+            icon: L.divIcon({
+                className: 'user-location-marker',
+                html: '<div style="background-color: #2d5016; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>',
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
+            })
+        }).addTo(currentMapInstance).bindPopup('<strong>Your Location</strong>');
         
         // Add markers for each recycler/junk shop
         places.forEach(place => {
             try {
                 if (place.lat && place.lng && !isNaN(place.lat) && !isNaN(place.lng)) {
-                    const marker = L.marker([place.lat, place.lng]).addTo(map);
+                    const marker = L.marker([place.lat, place.lng]).addTo(currentMapInstance);
                     const distance = calculateDistance(lat, lng, place.lat, place.lng);
                     marker.bindPopup(`
                         <div style="padding: 8px; min-width: 200px;">
@@ -341,26 +279,25 @@ function initMap(lat, lng, places) {
                             <p style="margin: 4px 0; font-size: 13px; color: #4a7c59;"><strong>Distance:</strong> ${distance.toFixed(2)} km</p>
                         </div>
                     `);
+                    currentMarkers.push(marker);
                 }
             } catch (markerError) {
                 console.warn('Could not add marker for place:', place.name, markerError);
             }
         });
         
-        // Handle map errors
-        map.on('tileerror', function(error, tile) {
-            console.warn('Map tile error:', error);
-        });
-        
-        console.log('Leaflet map initialized successfully');
+        console.log('Map updated with', places.length, 'places');
     } catch (error) {
-        console.error('Map initialization error:', error);
-        mapContainer.innerHTML = `
-            <div style="padding: 2rem; text-align: center; color: #7a8a7a;">
-                <p>Map could not be loaded.</p>
-                <p style="font-size: 0.9rem; margin-top: 0.5rem;">Error: ${error.message || 'Unknown error'}</p>
-                <button onclick="location.reload()" style="margin-top: 1rem; padding: 0.5rem 1rem; background-color: #4a7c59; color: white; border: none; border-radius: 4px; cursor: pointer;">Reload Page</button>
-            </div>
-        `;
+        console.error('Map update error:', error);
     }
 }
+
+// Old initMap function - keeping for backward compatibility but it now just calls updateMap
+function initMap(lat, lng, places) {
+    updateMap(lat, lng, places);
+}
+
+// Initialize map when page loads
+window.addEventListener('load', function() {
+    initializeMap();
+});
