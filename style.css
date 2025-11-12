@@ -207,14 +207,14 @@ main {
     margin-bottom: 0.5rem;
 }
 
-.detail-item a {
+.detail-item a:not(.directions-link) {
     color: #2d5016;
     text-decoration: none;
     border-bottom: 1px solid transparent;
     transition: border-color 0.2s ease;
 }
 
-.detail-item a:hover {
+.detail-item a:not(.directions-link):hover {
     border-bottom-color: #2d5016;
 }
 
