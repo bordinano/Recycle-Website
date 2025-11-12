@@ -2,6 +2,7 @@
 let currentMapInstance = null;
 let currentMarkers = [];
 let userLocationMarker = null;
+let places = []; // Store places globally for address updates
 
 // Function to geocode address to coordinates using Nominatim (free, no API key needed)
 async function geocodeAddress(address) {
@@ -18,6 +19,39 @@ async function geocodeAddress(address) {
         return null;
     } catch (error) {
         console.error('Geocoding error:', error);
+        return null;
+    }
+}
+
+// Function to reverse geocode coordinates to address using Nominatim (free, no API key needed)
+async function reverseGeocode(lat, lng) {
+    try {
+        // Add a small delay to respect Nominatim's usage policy (1 request per second)
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`);
+        const data = await response.json();
+        
+        if (data && data.address) {
+            const addr = data.address;
+            const addressParts = [];
+            
+            // Build address from components in logical order
+            if (addr.house_number) addressParts.push(addr.house_number);
+            if (addr.road) addressParts.push(addr.road);
+            if (addr.neighbourhood || addr.suburb) addressParts.push(addr.neighbourhood || addr.suburb);
+            if (addr.city || addr.town || addr.village) addressParts.push(addr.city || addr.town || addr.village);
+            if (addr.postcode) addressParts.push(addr.postcode);
+            if (addr.state) addressParts.push(addr.state);
+            if (addr.country) addressParts.push(addr.country);
+            
+            return addressParts.length > 0 
+                ? addressParts.join(', ') 
+                : data.display_name || null;
+        }
+        return data.display_name || null;
+    } catch (error) {
+        console.error('Reverse geocoding error:', error);
         return null;
     }
 }
@@ -84,16 +118,20 @@ async function fetchNearbyPlaces(lat, lng, radius = 10000) { // Radius in meters
             if (tags['addr:postcode']) addressParts.push(tags['addr:postcode']);
             if (tags['addr:state']) addressParts.push(tags['addr:state']);
             
-            const fullAddress = addressParts.length > 0 
+            const lat = element.lat || element.center?.lat;
+            const lng = element.lon || element.center?.lon;
+            
+            // Use address from tags if available, otherwise mark for reverse geocoding
+            const addressFromTags = addressParts.length > 0 
                 ? addressParts.join(', ') 
-                : (tags['addr:full'] || tags['addr:street'] || tags['addr:city'] || 
-                   `${(element.lat || element.center?.lat)?.toFixed(4)}, ${(element.lon || element.center?.lon)?.toFixed(4)}`);
+                : (tags['addr:full'] || tags['addr:street'] || tags['addr:city'] || null);
             
             return {
                 name: name,
-                lat: element.lat || element.center?.lat,
-                lng: element.lon || element.center?.lon,
-                address: fullAddress,
+                lat: lat,
+                lng: lng,
+                address: addressFromTags, // Will be updated with reverse geocoding if null
+                needsReverseGeocode: !addressFromTags, // Flag to indicate if we need to reverse geocode
                 materials: tags.recycling_type ? tags.recycling_type.split(';') : 
                           (tags.recycling ? [tags.recycling] : ['Various materials']),
                 type: type
@@ -120,10 +158,46 @@ document.getElementById('use-location').addEventListener('click', async () => {
             const userLat = position.coords.latitude;
             const userLng = position.coords.longitude;
             console.log('Geolocation success:', userLat, userLng);
-            const places = await fetchNearbyPlaces(userLat, userLng);
+            places = await fetchNearbyPlaces(userLat, userLng);
+            
+            // Display results immediately with available addresses
             displayResults(userLat, userLng, places);
             updateMap(userLat, userLng, places);
             loading.classList.add('hidden');
+            
+            // Reverse geocode addresses for places that need it (in background)
+            const placesNeedingAddress = places.filter(p => p.needsReverseGeocode);
+            if (placesNeedingAddress.length > 0) {
+                // Show a subtle indicator that addresses are being fetched
+                const detailsContent = document.getElementById('details-content');
+                const indicator = document.createElement('div');
+                indicator.id = 'address-loading-indicator';
+                indicator.style.cssText = 'padding: 0.5rem; text-align: center; color: #4a7c59; font-size: 0.9rem; font-style: italic;';
+                indicator.textContent = 'Fetching addresses...';
+                detailsContent.appendChild(indicator);
+                
+                // Fetch addresses one by one (with delay to respect API limits)
+                for (let i = 0; i < placesNeedingAddress.length; i++) {
+                    const place = placesNeedingAddress[i];
+                    const address = await reverseGeocode(place.lat, place.lng);
+                    if (address) {
+                        place.address = address;
+                    } else {
+                        // Fallback to coordinates if reverse geocoding fails
+                        place.address = `${place.lat.toFixed(4)}, ${place.lng.toFixed(4)}`;
+                    }
+                    delete place.needsReverseGeocode;
+                    
+                    // Update the display with the new address
+                    updateAddressInDisplay(place);
+                }
+                
+                // Remove loading indicator
+                const loadingIndicator = document.getElementById('address-loading-indicator');
+                if (loadingIndicator) {
+                    loadingIndicator.remove();
+                }
+            }
         },
         async error => {
             console.error('Geolocation error:', error);
@@ -154,14 +228,40 @@ function displayResults(lat, lng, places) {
         const distance = calculateDistance(lat, lng, place.lat, place.lng);
         const detailItem = document.createElement('div');
         detailItem.className = 'detail-item';
+        detailItem.id = `place-${index}`;
+        detailItem.dataset.placeIndex = index;
+        
+        // Show coordinates as placeholder if address is not available yet
+        const displayAddress = place.address || `${place.lat.toFixed(4)}, ${place.lng.toFixed(4)}`;
+        const addressLabel = place.address ? 'Address' : 'Location';
+        
         detailItem.innerHTML = `
             <h3>${place.name}</h3>
             ${place.type ? `<p class="type-badge">${place.type}</p>` : ''}
-            <p><strong>Address:</strong> ${place.address}</p>
+            <p><strong>${addressLabel}:</strong> <span class="address-text">${displayAddress}</span></p>
             <p><strong>Materials:</strong> ${place.materials.join(', ')}</p>
             <p class="distance">Distance: ${distance.toFixed(2)} km</p>
         `;
         detailsContent.appendChild(detailItem);
+    });
+}
+
+// Update address in the display when reverse geocoding completes
+function updateAddressInDisplay(place) {
+    const detailItems = document.querySelectorAll('.detail-item');
+    detailItems.forEach(item => {
+        const placeIndex = parseInt(item.dataset.placeIndex);
+        if (places[placeIndex] === place) {
+            const addressText = item.querySelector('.address-text');
+            if (addressText) {
+                addressText.textContent = place.address;
+                // Update the label from "Location" to "Address"
+                const addressLabel = item.querySelector('p strong');
+                if (addressLabel && addressLabel.textContent.includes('Location:')) {
+                    addressLabel.textContent = 'Address:';
+                }
+            }
+        }
     });
 }
 
