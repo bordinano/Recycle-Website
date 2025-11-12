@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recycle Finder - Find Nearby Recyclers & Junk Shops</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+</head>
+<body>
+    <header>
+        <h1>♻️ Recycle Finder</h1>
+        <p class="subtitle">Find nearby recyclers and junk shops</p>
+    </header>
+    <main>
+        <section id="search-section">
+            <input type="text" id="location" placeholder="Enter your address or city" aria-label="Location input">
+            <button id="search" aria-label="Search button">Search</button>
+            <button id="use-location" aria-label="Use current location">📍 Use My Location</button>
+        </section>
+        
+        <div id="loading" class="loading hidden">
+            <p>Searching for nearby recyclers and junk shops...</p>
+        </div>
+        
+        <div class="content-wrapper">
+            <section id="map-section">
+                <h2>Map</h2>
+                <div id="map"></div>
+            </section>
+            
+            <section id="details-section">
+                <h2>Details</h2>
+                <div id="details-content">
+                    <p class="placeholder">Search for a location to see details here.</p>
+                </div>
+            </section>
+        </div>
+    </main>
+    <!-- Leaflet (OpenStreetMap) - No API key needed! -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
