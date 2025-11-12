@@ -218,6 +218,27 @@ main {
     border-bottom-color: #2d5016;
 }
 
+.directions-link {
+    display: inline-block;
+    margin-top: 0.75rem;
+    padding: 0.5rem 1rem;
+    background-color: #4a7c59;
+    color: white !important;
+    text-decoration: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: background-color 0.3s ease, transform 0.2s ease;
+    border: none;
+}
+
+.directions-link:hover {
+    background-color: #2d5016;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    border-bottom: none !important;
+}
+
 @media (max-width: 968px) {
     .content-wrapper {
         grid-template-columns: 1fr;

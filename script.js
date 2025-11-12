@@ -3,6 +3,8 @@ let currentMapInstance = null;
 let currentMarkers = [];
 let userLocationMarker = null;
 let places = []; // Store places globally for address updates
+let currentUserLat = null;
+let currentUserLng = null;
 
 // Function to geocode address to coordinates using Nominatim (free, no API key needed)
 async function geocodeAddress(address) {
@@ -158,6 +160,9 @@ document.getElementById('use-location').addEventListener('click', async () => {
             const userLat = position.coords.latitude;
             const userLng = position.coords.longitude;
             console.log('Geolocation success:', userLat, userLng);
+            // Store user location globally
+            currentUserLat = userLat;
+            currentUserLng = userLng;
             places = await fetchNearbyPlaces(userLat, userLng);
             
             // Display results immediately with available addresses
@@ -235,12 +240,17 @@ function displayResults(lat, lng, places) {
         const displayAddress = place.address || `${place.lat.toFixed(4)}, ${place.lng.toFixed(4)}`;
         const addressLabel = place.address ? 'Address' : 'Location';
         
+        const directionsUrl = getGoogleMapsDirectionsUrl(place.lat, place.lng, currentUserLat, currentUserLng);
+        
         detailItem.innerHTML = `
             <h3>${place.name}</h3>
             ${place.type ? `<p class="type-badge">${place.type}</p>` : ''}
             <p><strong>${addressLabel}:</strong> <span class="address-text">${displayAddress}</span></p>
             <p><strong>Materials:</strong> ${place.materials.join(', ')}</p>
             <p class="distance">Distance: ${distance.toFixed(2)} km</p>
+            <a href="${directionsUrl}" target="_blank" class="directions-link" rel="noopener noreferrer">
+                🗺️ Get Directions
+            </a>
         `;
         detailsContent.appendChild(detailItem);
     });
@@ -272,6 +282,15 @@ function calculateDistance(lat1, lng1, lat2, lng2) {
     const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng/2) * Math.sin(dLng/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     return R * c;
+}
+
+// Generate Google Maps directions URL
+function getGoogleMapsDirectionsUrl(destinationLat, destinationLng, originLat = null, originLng = null) {
+    let url = `https://www.google.com/maps/dir/?api=1&destination=${destinationLat},${destinationLng}`;
+    if (originLat && originLng) {
+        url += `&origin=${originLat},${originLng}`;
+    }
+    return url;
 }
 
 // Initialize map once on page load
@@ -370,13 +389,19 @@ function updateMap(lat, lng, places) {
                 if (place.lat && place.lng && !isNaN(place.lat) && !isNaN(place.lng)) {
                     const marker = L.marker([place.lat, place.lng]).addTo(currentMapInstance);
                     const distance = calculateDistance(lat, lng, place.lat, place.lng);
+                    const directionsUrl = getGoogleMapsDirectionsUrl(place.lat, place.lng, currentUserLat, currentUserLng);
+                    const displayAddress = place.address || `${place.lat.toFixed(4)}, ${place.lng.toFixed(4)}`;
+                    
                     marker.bindPopup(`
                         <div style="padding: 8px; min-width: 200px;">
                             <h3 style="margin: 0 0 8px 0; color: #2d5016; font-size: 16px;">${place.name}</h3>
                             ${place.type ? `<p style="margin: 4px 0; font-size: 12px; color: #4a7c59; font-weight: 500;">${place.type}</p>` : ''}
-                            <p style="margin: 4px 0; font-size: 13px; color: #4a5a4a;">${place.address}</p>
+                            <p style="margin: 4px 0; font-size: 13px; color: #4a5a4a;">${displayAddress}</p>
                             <p style="margin: 4px 0; font-size: 13px;"><strong>Materials:</strong> ${place.materials.join(', ')}</p>
                             <p style="margin: 4px 0; font-size: 13px; color: #4a7c59;"><strong>Distance:</strong> ${distance.toFixed(2)} km</p>
+                            <a href="${directionsUrl}" target="_blank" style="display: inline-block; margin-top: 8px; padding: 6px 12px; background-color: #4a7c59; color: white; text-decoration: none; border-radius: 4px; font-size: 12px; font-weight: 500;" rel="noopener noreferrer">
+                                🗺️ Get Directions
+                            </a>
                         </div>
                     `);
                     currentMarkers.push(marker);
